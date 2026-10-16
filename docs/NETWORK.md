@@ -45,8 +45,8 @@ Tailscale exit node、OpenVPN、WireGuard 和其他策略可能优先于 main �
 
 WAN IPv6 隧道可能绕过 Air780E 的 IPv4 优先级。开发路由器通过专用 hotplug 策略处理：Air780E metric 5 默认路由存在时，只对带 Tailscale 标记的外层 IPv6 隧道流量设为不可达，促使其回退 IPv4 并走 Air780E；内层 IPv6 仍可经公共出口访问。停止 4G 后移除该策略，允许 WAN IPv4/IPv6 承载隧道。这是设备专用配置，插件安装不会自动添加。4G 运营商 NAT 可能需要 DERP 中继；WAN IPv6 可实现节点直连。切换底层接口时，现有连接可能短暂中断。
 
-## 自动检测与 WAN 回退（1.3.4）
+## 自动检测与 WAN 回退（1.3.6）
 
 30 秒是常规检测间隔；检测与短信／固件操作串行，长任务与恢复期间不会叠加检查。每次测试绑定模块 IPv4 源地址和独立路由表，不能用 WAN 或 VPN 的成功替代 4G。一个 HTTPS 端点失败后尝试另一个；失败后停止并重新启动上网，再复测。
 
-两次测试失败后把 Air780E 路由 metric 调为 50、停用模块 DNS，在已配置 GL kmwan 时暂时禁用 Air780E 成员，让 metric 10 的 WAN 接管。保留 ECM 接口供后续检测。回退后不自动重新夺回优先级；点击启动上网恢复 metric 5、模块 DNS 和此前 kmwan 状态。安装不会自动配置用户的 Tailscale 公共出口或 WAN IPv6。
+连续 3 次检测失败（重启后的复测也计数）且绑定 WAN 的外网验证通过后，把 Air780E 路由 metric 调为 50、停用模块 DNS，在已配置 GL kmwan 时暂时禁用 Air780E 成员，让 metric 10 的 WAN 接管。保留 ECM 接口供后续检测。回退后不自动重新夺回优先级；点击启动上网恢复 metric 5、模块 DNS 和此前 kmwan 状态。安装不会自动配置用户的 Tailscale 公共出口或 WAN IPv6。

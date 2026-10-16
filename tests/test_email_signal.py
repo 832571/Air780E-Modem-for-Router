@@ -68,3 +68,43 @@ class MailTests(unittest.TestCase):
         with patch.object(mail,'tls_context',return_value='verified-context'),patch.object(mail.smtplib,'SMTP',return_value=client):
             mail.session(self.config|{'tls':'STARTTLS'},'mock')
         self.assertEqual([c[0] for c in client.method_calls],['ehlo','starttls','ehlo','login'])
+
+    def test_submission_timestamp_saved_before_smtp_and_survives_refresh(self):
+        mail.save(self.store,self.config|{'recipients':['one@example.com']});self.incoming('new')
+        client=Mock()
+        def sending(*args,**kwargs):
+            record=mail.history(self.store)[0]
+            self.assertEqual(record['state'],'sending')
+            self.assertEqual(record['submitted_at'],1792080000.0)
+            return {}
+        client.send_message.side_effect=sending
+        with patch.object(mail,'session',return_value=client),patch.object(mail.time,'time',return_value=1792080000.0):
+            mail.forward(self.store,'mock')
+        self.assertEqual(mail.history(self.store)[0]['submitted_at'],1792080000.0)
+        self.assertEqual(mail.history(self.store)[0]['state'],'sent')
+        with patch.object(mail,'session') as session:
+            mail.forward(self.store,'mock');session.assert_not_called()
+        self.assertEqual(mail.history(self.store)[0]['submitted_at'],1792080000.0)
+
+    def test_legacy_history_migration_preserves_unknown_time(self):
+        with sms_store.connect(self.store) as db:
+            db.execute('CREATE TABLE mail_delivery (sms_id TEXT, recipient TEXT, state TEXT, detail TEXT, PRIMARY KEY(sms_id,recipient))')
+            db.execute("INSERT INTO mail_delivery VALUES ('old','one@example.com','sent','accepted')")
+        for _ in range(2):
+            record=mail.history(self.store)[0]
+            self.assertEqual(record['sms_id'],'old')
+            self.assertEqual(record['state'],'sent')
+            self.assertIsNone(record['submitted_at'])
+        mail.save(self.store,self.config|{'recipients':['one@example.com']});self.incoming('new')
+        client=Mock();client.send_message.return_value={}
+        with patch.object(mail,'session',return_value=client):mail.forward(self.store,'mock')
+        self.assertIsInstance(mail.history(self.store)[0]['submitted_at'],float)
+
+    def test_unknown_send_retains_attempt_time(self):
+        mail.save(self.store,self.config|{'recipients':['one@example.com']});self.incoming('new')
+        client=Mock();client.send_message.side_effect=TimeoutError()
+        with patch.object(mail,'session',return_value=client),patch.object(mail.time,'time',return_value=1792080001.0):
+            mail.forward(self.store,'mock')
+        record=mail.history(self.store)[0]
+        self.assertEqual(record['submitted_at'],1792080001.0)
+        self.assertEqual(record['state'],'unknown')

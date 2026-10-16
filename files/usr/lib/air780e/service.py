@@ -18,13 +18,14 @@ import time
 import uuid
 from pathlib import Path
 import email_forward
+import support_packages
 import firmware
 import signal_level
 import sms_store
 from network_monitor import TrafficSampler
 from serial_transport import ATSerial
 
-VERSION = '1.3.4'
+VERSION = '1.3.6'
 APP = 'AIR780E_DEMO'
 STORE = Path(os.environ.get('AIR780E_DATA_DIR', '/etc/air780e'))
 RUNTIME = Path(os.environ.get('AIR780E_RUN_DIR', '/var/run/air780e'))
@@ -218,6 +219,11 @@ class Service:
         self.next_health=0
         self.traffic=TrafficSampler()
         self.busy=False
+        self.auto_signature=None
+        self.auto_retry_at=0
+        self.failure_count=0
+        self.recovery_attempted=False
+        self.public_ip={'address':None,'checkedAt':None,'error':''}
         with sms_store.connect(STORE) as db:
             db.execute("UPDATE outbox SET state='unknown',error='服务重启，发送结果未知；没有自动重发' WHERE state='sending'")
 
@@ -244,7 +250,7 @@ class Service:
             'interface':info.get('l3_device'), 'addresses':info.get('ipv4-address',[]),
             'internetVerified':bool(active and signature==self.network_check.get('signature') and info.get('up') and self.network_check.get('interface')==info.get('l3_device') and
                 self.network_check.get('addresses')==info.get('ipv4-address',[]) and time.time()-self.network_check.get('time',0)<300),
-            'verification':self.network_check,'health':copy.deepcopy(self.health),'traffic':copy.deepcopy(self.traffic.latest),'fallback':bool(self.net_policy.get('fallback')),
+            'verification':self.network_check,'health':copy.deepcopy(self.health),'traffic':copy.deepcopy(self.traffic.latest),'fallback':bool(self.net_policy.get('fallback')),'publicIP':copy.deepcopy(self.public_ip),
             'note':'取得地址不等于互联网可用；Air780E 优先级 5，网线 WAN 优先级 10'}
 
     def diagnostics(self):
@@ -267,6 +273,12 @@ class Service:
                 finished = [key for key,value in self.jobs.items() if value['state'] in ('done','failed')]
                 for key in finished[:100]:
                     self.jobs.pop(key, None)
+            if action=='install_support':
+                pending=next((v for v in self.jobs.values() if v['action']==action and v['state'] in ('queued','running')),None)
+                if pending:return {'job':pending['id']}
+                self.jobs[ident]={'id':ident,'action':action,'state':'queued','submittedAt':time.time(),'completedAt':None}
+                threading.Thread(target=self.support_job,args=(ident,),daemon=True).start()
+                return {'job':ident}
             if self.queue.full():
                 raise RuntimeError('任务队列已满，请稍后重试')
             if action == 'send_sms':
@@ -275,9 +287,18 @@ class Service:
                     if existing:
                         return {'job':ident, 'previous':dict(existing)}
                 sms_store.sending(STORE,ident,params['number'],params['message'])
-            self.jobs[ident] = {'id':ident,'action':action,'state':'queued'}
+            self.jobs[ident] = {'id':ident,'action':action,'state':'queued','submittedAt':time.time(),'completedAt':None}
             self.queue.put_nowait((ident,action,params))
         return {'job':ident}
+
+    def support_job(self, ident):
+        # Package maintenance does not need the modem's serial worker.
+        with self.guard:self.jobs[ident]['state']='running'
+        try:
+            result=self.execute('install_support',{},ident)
+            with self.guard:self.jobs[ident].update(state='done',result=result,completedAt=time.time())
+        except Exception as error:
+            with self.guard:self.jobs[ident].update(state='failed',error=str(error),completedAt=time.time())
 
     def rpc(self, value):
         action = value.get('action', 'snapshot')
@@ -334,17 +355,19 @@ class Service:
         if action == 'install_firmware':
             if value.get('model')!='Air780EHV_A11' or value.get('confirmation')!='覆盖固件':
                 raise ValueError('请核对 Air780EHV_A11 型号，并明确确认覆盖固件')
-        if action in ('send_sms','start','stop','activate_network','sync','email_test','verify_network','prepare_firmware','install_firmware'):
+        if action in ('send_sms','start','stop','activate_network','sync','email_test','verify_network','prepare_firmware','install_firmware','install_support'):
             if action in ('start','stop'):
                 self.net_policy['enabled']=action=='start'
-                if action=='start':self.net_policy['fallback']=False
+                if action=='start':
+                    self.net_policy['fallback']=False
+                    self.failure_count=0;self.recovery_attempted=False
                 self.save_network_policy()
                 if action=='stop':self.health.update(state='disabled',detail='手动停止，自动恢复已暂停')
             return self.enqueue(action,value)
         if action == 'firmware_capabilities':
             supported=platform.machine() in ('aarch64','arm64')
             return {'supported':supported,'reason':'此 ARM64 路由器支持固件资源准备和安装/修复。烧录会覆盖模块核心与脚本，不自动备份原固件；请先核对型号并同步短信。' if supported else '此路由器架构暂无经验证的烧录工具，请使用原版 Mac 应用安装/修复。其他功能不受影响。',
-                'model':'Air780EHV_A11','core':'V2052','script':'0.2.3','resourcesReady':(firmware.CACHE/'ready.json').exists()}
+                'model':'Air780EHV_A11','core':'V2052','script':'0.2.3','cachePath':str(firmware.CACHE),'cacheCleanup':'reboot','resourcesReady':(firmware.CACHE/'ready.json').exists()}
         raise ValueError('不支持的操作')
 
     def activate(self):
@@ -361,6 +384,9 @@ class Service:
                 'network.air780e.device='+interface,'network.air780e.defaultroute=1','network.air780e.metric=5',
                 'network.air780e.peerdns=1','network.air780e.dns_metric=5','network.air780e.delegate=0']:
             run(['uci','set',assignment])
+        if subprocess.run(['uci','-q','get','network.wan'],capture_output=True,text=True).stdout.strip()=='interface':
+            run(['uci','set','network.wan.metric=10'])
+            run(['uci','set','network.wan.dns_metric=10'])
         run(['uci','commit','network'])
         # Join the existing WAN firewall zone so LAN clients receive NAT too.
         for index in range(32):
@@ -398,7 +424,14 @@ class Service:
 
     def execute(self, action, params, ident):
         def progress(value):
-            with self.guard:self.jobs[ident]['progress']=value
+            with self.guard:
+                self.jobs[ident]['progress']=value
+                if action=='install_firmware':
+                    stages=[('正在下载',10),('正在验证官方',35),('正在编译',45),('资源已校验',60),('正在写入',70),('固件写入完成',95)]
+                    percent=next((n for text,n in stages if value.startswith(text)),5)
+                    self.jobs[ident]['percent']=max(self.jobs[ident].get('percent',0),percent)
+        if action == 'install_support':
+            return support_packages.install(progress)
         if action == 'health_check':
             return self.check_health(ident)
         if action == 'prepare_firmware':
@@ -415,6 +448,7 @@ class Service:
             while time.monotonic()<deadline:
                 try:
                     self.modem.request('status')
+                    with self.guard:self.jobs[ident]['percent']=100
                     return '固件写入完成，配套设备协议已验证；请按需点击启动上网'
                 except Exception:
                     self.modem.close();time.sleep(1)
@@ -457,6 +491,7 @@ class Service:
                     if target:
                         self.activate()
                         self.wait_network()
+                        self.auto_signature=(self.modem.device or {}).get('signature')
                     else:
                         subprocess.run(['ifdown', 'air780e'], capture_output=True)
                     if not params.get('automatic'):
@@ -478,13 +513,15 @@ class Service:
             time.sleep(1)
         raise RuntimeError('USB 重新连接后未达到目标状态，请检查供电和模块连接')
 
-    def verify_network(self, wait_timeout=45, probe_timeout=20):
-        info=self.wait_network(wait_timeout)
+    def verify_network(self, wait_timeout=45, probe_timeout=20, interface_name='air780e'):
+        cellular=interface_name=='air780e'
+        info=self.wait_network(wait_timeout) if cellular else json.loads(run(['ubus','call','network.interface.wan','status'],3))
         addresses=info.get('ipv4-address',[])
         if not info.get('up') or not addresses:
             raise RuntimeError('USB 网卡尚未取得地址，请先激活网卡')
         interface=info.get('l3_device')
-        device=discover()
+        device=discover() if cellular else {'interface':interface,'signature':'wan'}
+        if not interface or not re.fullmatch(r'[a-zA-Z0-9_.-]{1,32}',interface):raise RuntimeError('网络接口不可用')
         if interface!=device['interface']:
             raise RuntimeError('网络接口与 USB 设备不匹配，已拒绝验证')
         source=str(ipaddress.IPv4Address(addresses[0]['address']))
@@ -498,7 +535,7 @@ class Service:
         if subprocess.run(['ip','route','show','table','1781'],capture_output=True,text=True).stdout.strip():
             raise RuntimeError('开发验证路由表已被使用，拒绝覆盖')
         rule=False
-        self.network_check={}
+        if cellular:self.network_check={}
         try:
             run(['ip','route','add',subnet,'dev',interface,'src',source,'table','1781'])
             run(['ip','route','add','default','via',gateway,'dev',interface,'table','1781'])
@@ -511,7 +548,7 @@ class Service:
             passed=False
             for host,path,marker in [('www.apple.com','/library/test/success.html','Success'),('www.cloudflare.com','/cdn-cgi/trace','ip=')]:
                 try:
-                    resolved=cellular_dns(host,source,servers or ['192.168.10.3','192.168.10.4'])
+                    resolved=cellular_dns(host,source,servers or (['192.168.10.3','192.168.10.4'] if cellular else ['1.1.1.1','8.8.8.8']))
                     result=subprocess.run(['curl','-4','--resolve',host+':443:'+resolved,'--noproxy','*','--interface',source,'--connect-timeout','5','--max-time',str(probe_timeout),
                         '-fsS','https://'+host+path],capture_output=True,text=True,timeout=probe_timeout+5)
                     if result.returncode==0 and marker in result.stdout:
@@ -521,6 +558,7 @@ class Service:
                     failure=str(error)
             if not passed:
                 raise RuntimeError('USB DHCP 正常，但绑定 4G 的 HTTPS 验证失败；请检查 SIM 数据业务、模块转发和路由策略（'+failure+'）')
+            if not cellular:return 'WAN 外网验证通过'
             self.network_check={'time':time.time(),'interface':interface,'addresses':addresses,'signature':device['signature'],'verified':True}
             return '4G 互联网验证成功：HTTPS 请求已绑定 '+interface+'（'+source+'），Air780E 优先出口'
         finally:
@@ -542,44 +580,82 @@ class Service:
         self.save_network_policy()
         run(['ifdown','air780e']);run(['ifup','air780e'])
 
+    def auto_connect(self):
+        if self.net_policy.get('enabled') is False or self.net_policy.get('fallback'):return
+        if time.monotonic()<self.auto_retry_at:return
+        with self.guard:
+            if any(j['action']=='start' and j['state'] in ('queued','running') for j in self.jobs.values()):return
+        try:
+            device=discover()
+            if device['signature']==self.auto_signature:return
+            # Request verifies the exact companion app/protocol before any control.
+            self.modem.request('status')
+            self.auto_retry_at=time.monotonic()+60
+            self.net_policy['enabled']=True
+            self.save_network_policy()
+            self.enqueue('start',{'automatic':True})
+        except Exception:
+            self.auto_retry_at=time.monotonic()+10
+
     def check_health(self, ident):
-        if self.net_policy.get('enabled') is False:
+        def paused():
+            stopped=self.net_policy.get('enabled') is False
+            if stopped:self.health.update(state='disabled',detail='手动停止，自动恢复已暂停')
+            return stopped
+        def failed(error):
+            self.failure_count+=1
+            self.health.update(state='failed',checkedAt=time.time(),detail=str(error),error=str(error),failures=self.failure_count)
+        def healthy(detail):
+            self.failure_count=0;self.recovery_attempted=False
+            self.health.update(state='healthy',checkedAt=time.time(),error='',detail=detail,failures=0)
+            return detail
+        if paused():
             self.health.update(state='disabled',detail='手动停止，自动恢复已暂停');return self.health['detail']
+        if self.net_policy.get('enabled') is None:return '等待自动识别 USB 设备'
         self.health.update(state='checking',detail='正在检测 SIM 与 4G 外网连接')
         try:
-            state=self.modem.request('status')
-            if self.net_policy.get('enabled') is None:
-                self.net_policy['enabled']=bool(state.get('usbEnabled'))
-                self.save_network_policy()
-                if not self.net_policy['enabled']:
-                    self.health.update(state='disabled',detail='手动停止，自动恢复已暂停');return self.health['detail']
+            self.modem.request('status')
             self.verify_network(wait_timeout=3,probe_timeout=8)
-            if self.net_policy.get('enabled') is False:
-                self.health.update(state='disabled',detail='手动停止，自动恢复已暂停');return self.health['detail']
-            self.health.update(state='healthy',checkedAt=time.time(),error='',detail='SIM 蜂窝外网正常')
-            return self.health['detail']
-        except Exception as error:
-            self.health.update(state='failed',checkedAt=time.time(),detail=str(error),error=str(error))
-        if self.net_policy.get('enabled') is None:return self.health['detail']
-        if self.net_policy.get('enabled') is False:return '手动停止，自动恢复已暂停'
+            if paused():return '手动停止，自动恢复已暂停'
+            return healthy('SIM 蜂窝外网正常')
+        except Exception as error:failed(error)
+        if paused():return '手动停止，自动恢复已暂停'
         if self.net_policy.get('fallback'):
             self.health.update(state='wan',detail='4G 仍不可用，继续使用 WAN');return self.health['detail']
-        self.health.update(state='restarting',detail='4G 检测失败，正在重启上网')
+        if not self.recovery_attempted:
+            self.recovery_attempted=True
+            self.health.update(state='restarting',detail='4G 检测失败，正在重启上网')
+            try:
+                self.execute('stop',{'automatic':True},ident)
+                if paused():return '手动停止，自动恢复已暂停'
+                self.execute('start',{'automatic':True},ident)
+                self.verify_network(wait_timeout=3,probe_timeout=8)
+                if paused():return '手动停止，自动恢复已暂停'
+                return healthy('重启后 4G 外网已恢复')
+            except Exception as error:failed(error)
+        if paused():return '手动停止，自动恢复已暂停'
+        if self.failure_count<3:
+            self.health.update(state='failed',detail='等待下一轮检测，连续失败次数：'+str(self.failure_count));return self.health['detail']
         try:
-            self.execute('stop',{'automatic':True},ident)
-            if self.net_policy.get('enabled') is False:return '手动停止，自动恢复已暂停'
-            self.execute('start',{'automatic':True},ident)
-            self.verify_network(wait_timeout=3,probe_timeout=8)
-            if self.net_policy.get('enabled') is False:
-                self.health.update(state='disabled',detail='手动停止，自动恢复已暂停');return self.health['detail']
-            self.health.update(state='healthy',checkedAt=time.time(),error='',detail='重启后 4G 外网已恢复')
-            return self.health['detail']
+            self.verify_network(wait_timeout=3,probe_timeout=8,interface_name='wan')
         except Exception as error:
-            self.health.update(state='failed',checkedAt=time.time(),detail=str(error),error=str(error))
-        if self.net_policy.get('enabled') is False:return '手动停止，自动恢复已暂停'
+            self.health.update(state='failed',detail='WAN 外网验证失败，未切换出口',wanError=str(error));return self.health['detail']
+        if paused():return '手动停止，自动恢复已暂停'
         self.use_wan()
-        self.health.update(state='wan',detail='重启后 4G 仍不可用，已切换 WAN')
+        self.health.update(state='wan',detail='4G 连续失败 3 次，WAN 验证通过，已切换 WAN')
         return self.health['detail']
+
+    def public_ip_worker(self):
+        while not self.stopping.is_set():
+            try:
+                result=run(['curl','-4','--noproxy','*','--connect-timeout','5','--max-time','10','-fsS','https://www.cloudflare.com/cdn-cgi/trace'],15)
+                value=next(line[3:].strip() for line in result.splitlines() if line.startswith('ip='))
+                address=ipaddress.ip_address(value)
+                if not address.is_global:raise ValueError('Invalid public IP')
+                self.public_ip={'address':str(address),'checkedAt':time.time(),'error':''}
+            except Exception:
+                self.public_ip={'address':None,'checkedAt':time.time(),'error':'公网 IP 获取失败'}
+            self.stopping.wait(60)
 
     def traffic_worker(self):
         while not self.stopping.is_set():
@@ -596,6 +672,8 @@ class Service:
             try:
                 ident,action,params = self.queue.get(timeout=.2)
             except queue.Empty:
+                self.auto_connect()
+                if not self.queue.empty():continue
                 if time.monotonic()>=self.next_health and self.net_policy.get('enabled') is not False:
                     self.next_health=time.monotonic()+30
                     self.enqueue('health_check',{})
@@ -617,9 +695,9 @@ class Service:
             self.busy=True
             try:
                 result=self.execute(action,params,ident)
-                with self.guard: self.jobs[ident].update(state='done',result=result)
+                with self.guard: self.jobs[ident].update(state='done',result=result,completedAt=time.time())
             except Exception as error:
-                with self.guard: self.jobs[ident].update(state='failed',error=str(error))
+                with self.guard: self.jobs[ident].update(state='failed',error=str(error),completedAt=time.time())
                 self.modem.close()
             finally:
                 self.busy=False
@@ -662,6 +740,7 @@ def main():
         threading.Thread(target=service.worker,daemon=True).start()
         threading.Thread(target=service.mail_worker,daemon=True).start()
         threading.Thread(target=service.traffic_worker,daemon=True).start()
+        threading.Thread(target=service.public_ip_worker,daemon=True).start()
         try: server.serve_forever()
         finally: service.stopping.set(); service.modem.close()
 

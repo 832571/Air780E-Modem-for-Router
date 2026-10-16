@@ -63,6 +63,13 @@ def test_connection(store,password):
     try: client.noop()
     finally: client.close()
     return 'SMTP 加密连接与登录成功；没有发送测试邮件。'
+def ensure_delivery_schema(db):
+    db.execute('CREATE TABLE IF NOT EXISTS mail_delivery (sms_id TEXT, recipient TEXT, state TEXT, detail TEXT, submitted_at REAL, PRIMARY KEY(sms_id,recipient))')
+    # Old records have no trustworthy SMTP submission timestamp.
+    columns={row[1] for row in db.execute('PRAGMA table_info(mail_delivery)')}
+    if 'submitted_at' not in columns:
+        db.execute('ALTER TABLE mail_delivery ADD COLUMN submitted_at REAL')
+
 def forward(store,password):
     config=load(store)
     if not config.get('enabled'): return '邮件转发：未启用'
@@ -72,7 +79,7 @@ def forward(store,password):
         try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError: return '邮件转发：其他任务正在执行'
         with sms_store.connect(store) as db:
-            db.execute('CREATE TABLE IF NOT EXISTS mail_delivery (sms_id TEXT, recipient TEXT, state TEXT, detail TEXT, PRIMARY KEY(sms_id,recipient))')
+            ensure_delivery_schema(db)
             # Interrupted sends cannot be presumed undelivered; no automatic resend.
             db.execute("UPDATE mail_delivery SET state='unknown',detail='上次转发中断，不能判断是否已送达' WHERE state='sending'")
             rows=db.execute('SELECT rowid,* FROM inbox WHERE rowid>? AND deleted=0 ORDER BY rowid',(config['after_rowid'],)).fetchall()
@@ -98,14 +105,14 @@ def forward(store,password):
         accepted=0
         try:
             for row,target in pending:
-                with sms_store.connect(store) as db:
-                    db.execute("INSERT INTO mail_delivery VALUES (?,?,'sending','')",(row['id'],target))
                 mail=EmailMessage()
                 mail['From']=config['sender']; mail['To']=target
                 mail['Subject']='USB 短信转发'
                 mail['Date']=formatdate(localtime=True)
                 mail['Message-ID']='<'+str(uuid.uuid5(uuid.NAMESPACE_URL,row['id']+'|'+target))+'@air780e-modem.local>'
                 mail.set_content('发送号码：'+row['number']+'\n接收时间：'+row['received']+'\n\n'+row['message'])
+                with sms_store.connect(store) as db:
+                    db.execute("INSERT INTO mail_delivery (sms_id,recipient,state,detail,submitted_at) VALUES (?,?,'sending','',?)",(row['id'],target,time.time()))
                 try:
                     refused=client.send_message(mail,from_addr=config['sender'],to_addrs=[target])
                     state,detail=('failed','SMTP 拒绝收件人') if refused else ('sent','邮件服务器已接受，不保证最终送达')
@@ -121,5 +128,5 @@ def forward(store,password):
         return '邮件转发：本轮服务器接受 '+str(accepted)+' 项；详细结果见转发记录'
 def history(store):
     with sms_store.connect(store) as db:
-        db.execute('CREATE TABLE IF NOT EXISTS mail_delivery (sms_id TEXT, recipient TEXT, state TEXT, detail TEXT, PRIMARY KEY(sms_id,recipient))')
+        ensure_delivery_schema(db)
         return [dict(row) for row in db.execute('SELECT * FROM mail_delivery ORDER BY rowid DESC LIMIT 100').fetchall()]

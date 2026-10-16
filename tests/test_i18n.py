@@ -5,7 +5,8 @@ class TranslationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.page=(Path(__file__).resolve().parents[1]/'files/usr/lib/lua/luci/view/air780e/dashboard.htm').read_text()
-        cls.catalog=json.loads(re.search(r'var dictionary=(.*);\nvar translationKeys',cls.page).group(1))
+        catalog=(Path(__file__).resolve().parents[1]/'files/www/luci-static/resources/air780e/translations.js').read_text()
+        cls.catalog=json.loads(catalog.removeprefix('window.Air780ETranslations=').strip().removesuffix(';'))
     def test_all_static_labels_have_both_translations(self):
         for key in re.findall(r'data-i18n(?:-placeholder|-aria-label)?="([^"]+)"',self.page):
             with self.subTest(key=key):

@@ -2,6 +2,22 @@
 
 [简体中文](CHANGELOG.md) | **English**
 
+## V1.3 / 1.3.6 (2026-10-15)
+
+- Includes the 1.3.5 SMTP timestamp and Unicode support changes below. Upgrade through LuCI System → Software after updating this signed feed.
+- Validation: 61 automated tests, normal connectivity/autostart and three-language UI verified on GL-MT3000. Firmware progress/completion tested with simulation.
+- Auto-detect supported USB companion devices and start ECM/DHCP with Air780E first and wired WAN second; preserve explicit manual Stop.
+- After three consecutive failed checks, verify WAN before fallback; retain 9-second traffic sampling.
+- Explain temporary firmware cache and reboot cleanup; add actual stage progress, verified 100% completion and explicit completion acknowledgement.
+- Open Tasks & diagnostics by default with submission/completion timestamps to the second in browser local time.
+- Show current-egress public IPv4 below USB Internet, refreshed every 60 seconds, including Tailscale exit use.
+
+## V1.3 / 1.3.5 (development build, shipped with 1.3.6)
+
+- Add automatic python3-codecs dependency and an Install support package button after Refresh forwarding history, with installation and Unicode codec verification.
+- Prefix email-forwarding records with SMTP submission date and time down to seconds in the browser local timezone; refresh preserves the original timestamp.
+- Migrate existing databases without losing history; legacy records show an unknown submission time instead of a fabricated refresh time.
+
 ## V1.3 / 1.3.4 (2026-10-10)
 
 - Add 30-second cellular Internet checks bound to Air780E, with status, timestamps and failure details.

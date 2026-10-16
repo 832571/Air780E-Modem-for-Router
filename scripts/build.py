@@ -7,14 +7,14 @@ import tarfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '1.3.4'
+VERSION = '1.3.6'
 CONTROL = f'''Package: luci-app-air780e
 Version: {VERSION}
 Architecture: all
 Maintainer: 点击网络
 Section: net
 Priority: optional
-Depends: lua, luci-base, luci-compat, luci-lib-nixio, kmod-usb-acm, kmod-usb-net-cdc-ether, python3-light, python3-sqlite3, python3-email, python3-openssl, python3-urllib, python3-lzma, ca-bundle, curl, ip-full, zstd
+Depends: lua, luci-base, luci-compat, luci-lib-nixio, kmod-usb-acm, kmod-usb-net-cdc-ether, python3-light, python3-codecs, python3-sqlite3, python3-email, python3-openssl, python3-urllib, python3-lzma, ca-bundle, curl, ip-full, zstd
 Description: Air780E Modem for Router V1.3 - USB ECM, SMS and SMTP forwarding (MIT)
 '''
 

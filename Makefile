@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-air780e
-PKG_VERSION:=1.3.4
+PKG_VERSION:=1.3.6
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
@@ -14,7 +14,7 @@ define Package/luci-app-air780e
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=Air780E Modem for Router V1.3
-  DEPENDS:=+lua +luci-base +luci-compat +luci-lib-nixio +kmod-usb-acm +kmod-usb-net-cdc-ether +python3-light +python3-sqlite3 +python3-email +python3-openssl +python3-urllib +python3-lzma +ca-bundle +curl +ip-full +zstd
+  DEPENDS:=+lua +luci-base +luci-compat +luci-lib-nixio +kmod-usb-acm +kmod-usb-net-cdc-ether +python3-light +python3-codecs +python3-sqlite3 +python3-email +python3-openssl +python3-urllib +python3-lzma +ca-bundle +curl +ip-full +zstd
 endef
 
 define Build/Compile

@@ -6,7 +6,7 @@ A GL.iNet / OpenWrt LuCI plugin for USB cellular Internet, SMS management and em
 
 **Fully open source under the MIT license. Free to use, copy, modify, redistribute and use commercially, provided the copyright and license notices are retained.** See [LICENSE](LICENSE). No subscriptions, activation keys or telemetry. Third-party dependencies and module core firmware have separate licenses; see [Third-party components](THIRD_PARTY.en.md).
 
-Product name: **V1.3**. OpenWrt package version: **1.3.4**. Package: `luci-app-air780e`.
+Product name: **V1.3**. OpenWrt package version: **1.3.6**. Package: `luci-app-air780e`.
 
 ## Verified hardware
 
@@ -37,11 +37,17 @@ Alternatively, download the IPK from [Releases](https://github.com/832571/Air780
 
 Open **Services → Air780E Modem**. GL's management page and LuCI may use different ports; the development router uses port 8080 for LuCI. Connect the module, click **Start Internet**, wait for DHCP, then click **Verify 4G connection**.
 
-## Features and languages
+## Features
+
+- Automatically detect supported USB companion devices and start ECM/DHCP with Air780E metric 5 and wired WAN metric 10; explicit Manual Stop pauses recovery.
+- Open Tasks & diagnostics by default, with submission/completion timestamps. Show current-egress public IPv4 under USB Internet, refreshed every 60 seconds.
+- Display actual firmware stage progress, verified 100% completion and explicit acknowledgement. Cache: `/tmp/air780e-firmware`; no scheduled cleanup, cleared on router reboot.
+- Depend on `python3-codecs` automatically and provide Install support package for Unicode verification/repair. Forwarding history includes SMTP submission time; unavailable legacy timestamps remain unknown.
+- This release passes 61 regression tests; firmware progress/completion use simulation, without repeating a live flash. and languages
 
 - Check SIM cellular Internet through the Air780E interface every 30 seconds, showing state and last check time; use two independent HTTPS endpoints.
 - Sample and display USB upload/download bytes, packets and rates every 9 seconds. Cumulative counters may reset on reconnection, include probes/tunnel traffic, and do not represent carrier billing.
-- On failed connectivity, restart 4G once and retest; if it still fails, use WAN. Continue checking in fallback without repeated restarts. Click Start Internet to restore 4G priority. Manual Stop pauses automatic recovery; closing the page does not stop monitoring.
+- On failed connectivity, restart 4G once and retest; after three consecutive failed checks, verify WAN and switch only if it is usable. Continue checking in fallback without repeated restarts. Click Start Internet to restore 4G priority. Manual Stop pauses automatic recovery; closing the page does not stop monitoring.
 - Checks share a serialized queue with SMS and firmware tasks to prevent concurrent USB control. Busy tasks, restart and timeout handling can defer checks.
 
 - Simplified Chinese, English and Traditional Chinese UI. Simplified Chinese is the initial default; the browser remembers explicit language choices. Switching languages preserves SMS content and form input.

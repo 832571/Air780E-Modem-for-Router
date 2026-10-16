@@ -46,8 +46,8 @@ Check `ip route`, `ip rule` and `ubus call network.interface.air780e status`, th
 
 To restore prior policy, stop Air780E, restore backed-up configuration and reload networking, firewall and GL kmwan. Uninstall retains data and network settings; restore routing separately to avoid changing unrelated services.
 
-## Automatic checking and WAN fallback (1.3.4)
+## Automatic checking and WAN fallback (1.3.6)
 
 30 seconds is the normal check interval. Checks are serialized with SMS/firmware operations; long tasks and recovery do not overlap checks. Probes bind the module IPv4 source and a dedicated routing table, so WAN/VPN success cannot substitute for 4G success. Try a second HTTPS endpoint if the first fails; stop and restart Internet once, then retest.
 
-If both rounds fail, set Air780E route metric 50, disable module DNS and temporarily disable its GL kmwan member when configured, allowing metric-10 WAN to take over. Keep ECM available for subsequent checks. Fallback does not automatically reclaim priority; click Start Internet to restore metric 5, module DNS and prior kmwan state. Installation does not automatically configure a Tailscale exit node or WAN IPv6.
+After three consecutive failed checks (including the post-restart retest), verify Internet bound to WAN first. Only if WAN succeeds, set Air780E route metric 50, disable module DNS and temporarily disable its GL kmwan member when configured, allowing metric-10 WAN to take over. Keep ECM available for subsequent checks. Fallback does not automatically reclaim priority; click Start Internet to restore metric 5, module DNS and prior kmwan state. Installation does not automatically configure a Tailscale exit node or WAN IPv6.

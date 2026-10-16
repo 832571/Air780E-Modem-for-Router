@@ -22,10 +22,42 @@ class RecoveryTests(unittest.TestCase):
         with patch.object(self.server.modem,'request',return_value={'usbEnabled':True}),patch.object(self.server,'verify_network',side_effect=[RuntimeError('failed'),None]),patch.object(self.server,'execute') as execute,patch.object(self.server,'use_wan') as wan:
             self.server.check_health('test')
         self.assertEqual([c.args[0] for c in execute.call_args_list],['stop','start']);wan.assert_not_called();self.assertEqual(self.server.health['state'],'healthy')
-    def test_failed_restart_switches_wan_and_records_reason(self):
+    def test_three_failures_verify_wan_before_switch(self):
+        def verify(**kwargs):
+            if kwargs.get('interface_name')!='wan':raise RuntimeError('offline')
+        with patch.object(self.server.modem,'request',return_value={'usbEnabled':True}),patch.object(self.server,'verify_network',side_effect=verify) as probe,patch.object(self.server,'execute') as execute,patch.object(self.server,'use_wan') as wan:
+            self.server.check_health('first')
+            self.assertEqual(self.server.failure_count,2);wan.assert_not_called()
+            self.server.check_health('second')
+        wan.assert_called_once();self.assertEqual(self.server.health['state'],'wan')
+        self.assertEqual(probe.call_args.kwargs['interface_name'],'wan')
+        self.assertEqual(execute.call_count,2)
+
+    def test_unavailable_wan_does_not_change_routes(self):
         with patch.object(self.server.modem,'request',return_value={'usbEnabled':True}),patch.object(self.server,'verify_network',side_effect=RuntimeError('offline')),patch.object(self.server,'execute'),patch.object(self.server,'use_wan') as wan:
+            self.server.check_health('first');self.server.check_health('second')
+        wan.assert_not_called();self.assertIn('WAN',self.server.health['detail'])
+
+    def test_health_success_resets_failure_streak(self):
+        self.server.failure_count=2;self.server.recovery_attempted=True
+        with patch.object(self.server.modem,'request',return_value={'usbEnabled':True}),patch.object(self.server,'verify_network'):
             self.server.check_health('test')
-        wan.assert_called_once();self.assertEqual(self.server.health['state'],'wan');self.assertEqual(self.server.health['error'],'offline')
+        self.assertEqual(self.server.failure_count,0);self.assertFalse(self.server.recovery_attempted)
+
+    def test_usb_autostart_requires_recognized_protocol_and_respects_stop(self):
+        self.server.net_policy['enabled']=None
+        with patch.object(service,'discover',return_value={'signature':'usb-new'}),patch.object(self.server.modem,'request',return_value={'usbEnabled':False}) as request:
+            self.server.auto_connect();self.server.auto_connect()
+        self.assertEqual(self.server.queue.qsize(),1);request.assert_called_once_with('status')
+        self.assertIs(self.server.net_policy['enabled'],True)
+        self.server.net_policy['enabled']=False;self.server.auto_retry_at=0
+        with patch.object(service,'discover') as discover:self.server.auto_connect();discover.assert_not_called()
+
+    def test_incompatible_usb_never_gets_start_command(self):
+        with patch.object(service,'discover',return_value={'signature':'other'}),patch.object(self.server.modem,'request',side_effect=RuntimeError('untrusted')):
+            self.server.auto_connect()
+        self.assertTrue(self.server.queue.empty())
+
     def test_manual_stop_cancels_recovery_before_start(self):
         def stop(*args):self.server.net_policy['enabled']=False
         with patch.object(self.server.modem,'request',return_value={'usbEnabled':True}),patch.object(self.server,'verify_network',side_effect=RuntimeError('offline')),patch.object(self.server,'execute',side_effect=stop) as execute,patch.object(self.server,'use_wan') as wan:
