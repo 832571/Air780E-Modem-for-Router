@@ -7,8 +7,8 @@ class TrashTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store=Path(directory)
             with sms_store.connect(store) as db:
-                db.executemany('INSERT INTO inbox VALUES (?,?,?,?,?)',[(str(i),'10010','example','now',1) for i in range(510)])
-                db.execute("INSERT INTO inbox VALUES ('keep','10010','keep','now',0)")
+                db.executemany('INSERT INTO inbox (id,number,message,received,deleted) VALUES (?,?,?,?,?)',[(str(i),'10010','example','now',1) for i in range(510)])
+                db.execute("INSERT INTO inbox (id,number,message,received,deleted) VALUES ('keep','10010','keep','now',0)")
             sms_store.sending(store,'sent','10010','keep sent')
             self.assertEqual(sms_store.clear_trash(store),510)
             self.assertEqual(sms_store.rows(store,'trash'),[])

@@ -13,6 +13,8 @@ def _connect(store):
     db.execute('CREATE TABLE IF NOT EXISTS inbox (id TEXT PRIMARY KEY, number TEXT, message TEXT, received TEXT)')
     if 'deleted' not in [r[1] for r in db.execute('PRAGMA table_info(inbox)')]:
         db.execute('ALTER TABLE inbox ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0')
+    if 'receiving_number' not in [r[1] for r in db.execute('PRAGMA table_info(inbox)')]:
+        db.execute("ALTER TABLE inbox ADD COLUMN receiving_number TEXT NOT NULL DEFAULT ''")
     db.execute('CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, number TEXT, message TEXT, received TEXT, state TEXT, error TEXT)')
     if 'deleted' not in [r[1] for r in db.execute('PRAGMA table_info(outbox)')]:
         db.execute('ALTER TABLE outbox ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0')
@@ -47,7 +49,7 @@ def save(store,frame):
         if db.execute('SELECT 1 FROM inbox WHERE id=?',(frame['sms_id'],)).fetchone(): return
         db.execute('UPDATE sms_sequence SET last_rowid=last_rowid+1 WHERE singleton=1')
         index=db.execute('SELECT last_rowid FROM sms_sequence WHERE singleton=1').fetchone()[0]
-        db.execute('INSERT INTO inbox (rowid,id,number,message,received) VALUES (?,?,?,?,?)',(index,frame['sms_id'],frame.get('number',''),frame.get('message',''),frame.get('received','')))
+        db.execute('INSERT INTO inbox (rowid,id,number,message,received,receiving_number) VALUES (?,?,?,?,?,?)',(index,frame['sms_id'],frame.get('number',''),frame.get('message',''),frame.get('received',''),frame.get('receiving_number','')))
 
 def rows(store,kind='inbox'):
     with connect(store) as db:

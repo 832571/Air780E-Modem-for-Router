@@ -41,7 +41,7 @@ function api()
         payload=http.formvalue('payload')
     else
         local action=http.formvalue('action') or 'snapshot'
-        if action~='traffic' and action~='snapshot' and action~='diagnostics' and action~='email_config' and
+        if action~='system_settings' and action~='traffic' and action~='snapshot' and action~='diagnostics' and action~='email_config' and
            action~='email_history' and action~='firmware_capabilities' then
             http.status(405,'Method Not Allowed'); return
         end

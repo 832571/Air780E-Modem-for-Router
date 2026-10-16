@@ -14,6 +14,39 @@ class RecoveryTests(unittest.TestCase):
         self.server.modem.close()
         for item in self.patches:item.stop()
         self.temp.cleanup()
+    def test_settings_persist_and_reject_invalid_without_change(self):
+        values={'health_interval':45,'failure_limit':5,'traffic_interval':12,'receiving_number':'+8613800000000'}
+        self.server.rpc({'action':'system_settings_save','settings':values})
+        restored=service.Service()
+        self.assertEqual(restored.rpc({'action':'system_settings'}),values)
+        self.assertEqual(restored.health['interval'],45)
+        self.assertEqual((self.root/'store/system-settings.json').stat().st_mode&0o777,0o600)
+        for bad in [dict(values,traffic_interval=0),dict(values,failure_limit=True),dict(values,health_interval=5.5),{},dict(values,extra=3),dict(values,receiving_number='13800000000'),dict(values,receiving_number='+86\n13800000000')]:
+            with self.assertRaises(ValueError):self.server.rpc({'action':'system_settings_save','settings':bad})
+            self.assertEqual(self.server.system_settings(),values)
+
+    def test_manual_number_is_captured_only_when_sim_number_missing(self):
+        self.server.rpc({'action':'system_settings_save','settings':{'health_interval':30,'failure_limit':3,'traffic_interval':9,'receiving_number':'+8613800000000'}})
+        modem=self.server.modem;modem.trusted=True
+        with patch.object(service.sms_store,'save') as save:
+            modem.accept({'app':service.APP,'protocol':1,'event':'sms_received','sms_id':'test'})
+            self.assertEqual(save.call_args.args[1]['receiving_number'],'+8613800000000')
+            modem.state['phoneNumber']='+14155550123'
+            modem.accept({'app':service.APP,'protocol':1,'event':'sms_received','sms_id':'test2'})
+            self.assertEqual(save.call_args.args[1]['receiving_number'],'+14155550123')
+        modem.close()
+        self.assertIsNone(modem.state['phoneNumber'])
+
+    def test_configurable_threshold_still_verifies_wan(self):
+        self.server.rpc({'action':'system_settings_save','settings':{'health_interval':45,'failure_limit':4,'traffic_interval':12}})
+        def verify(**kwargs):
+            if kwargs.get('interface_name')!='wan':raise RuntimeError('offline')
+        with patch.object(self.server.modem,'request'),patch.object(self.server,'execute'),patch.object(self.server,'verify_network',side_effect=verify),patch.object(self.server,'use_wan') as wan:
+            self.server.check_health('one');self.server.check_health('two')
+            wan.assert_not_called()
+            self.server.check_health('three');wan.assert_called_once()
+        self.assertEqual(self.server.failure_count,4)
+
     def test_healthy_checks_do_not_restart_or_failover(self):
         with patch.object(self.server.modem,'request',return_value={'usbEnabled':True}),patch.object(self.server,'verify_network') as verify,patch.object(self.server,'execute') as execute,patch.object(self.server,'use_wan') as wan:
             self.server.check_health('test')

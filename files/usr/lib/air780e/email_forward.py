@@ -110,7 +110,7 @@ def forward(store,password):
                 mail['Subject']='USB 短信转发'
                 mail['Date']=formatdate(localtime=True)
                 mail['Message-ID']='<'+str(uuid.uuid5(uuid.NAMESPACE_URL,row['id']+'|'+target))+'@air780e-modem.local>'
-                mail.set_content('发送号码：'+row['number']+'\n接收时间：'+row['received']+'\n\n'+row['message'])
+                mail.set_content('接收短信手机号：'+(row.get('receiving_number') or '未知（SIM 未提供本机号码或历史记录未保存）')+'\n发送号码：'+row['number']+'\n接收时间：'+row['received']+'\n\n'+row['message'])
                 with sms_store.connect(store) as db:
                     db.execute("INSERT INTO mail_delivery (sms_id,recipient,state,detail,submitted_at) VALUES (?,?,'sending','',?)",(row['id'],target,time.time()))
                 try:

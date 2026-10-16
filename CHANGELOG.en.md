@@ -2,6 +2,17 @@
 
 [简体中文](CHANGELOG.md) | **English**
 
+## V1.3 / 1.3.7 (2026-10-15)
+
+- Forwarded emails include the receiving phone number captured when the SMS is stored, preventing later SIM changes from relabeling older messages. Legacy records without a number are explicitly marked unknown.
+- System settings accept a persistent manual number in `+country-code-and-phone-number` format. Used only when the SIM does not supply a number, for subsequent SMS and the status display.
+- Display “Loading content” during navigation, initial reads and settings saves; clear it on success or failure and ignore obsolete module responses during rapid navigation.
+- Persist and apply configurable 4G checks (default 30 seconds, range 5–3600), consecutive failure threshold (default 3, range 1–20), and traffic sampling/refresh (default 9 seconds, range 1–3600).
+- Restart once on initial failure. A failed recovery retest also counts. Fall back only after the threshold and successful WAN verification; preserve manual Stop, Air780E priority and existing Tailscale configuration.
+- Update Simplified Chinese, English and Traditional Chinese interfaces. Full source remains MIT licensed.
+- Validation: 65 automated tests. GL-MT3000 verified settings save, persistence across service restart, restored defaults, loading indicators and all three languages. Email bodies tested using mocked SMTP, without extra email delivery or firmware flashing.
+- After configuring this signed project feed, update lists in LuCI System → Software and upgrade `luci-app-air780e`. This is a community feed, not an official GL.iNet/OpenWrt listing.
+
 ## V1.3 / 1.3.6 (2026-10-15)
 
 - Includes the 1.3.5 SMTP timestamp and Unicode support changes below. Upgrade through LuCI System → Software after updating this signed feed.

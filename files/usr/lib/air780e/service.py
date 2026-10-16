@@ -25,7 +25,7 @@ import sms_store
 from network_monitor import TrafficSampler
 from serial_transport import ATSerial
 
-VERSION = '1.3.6'
+VERSION = '1.3.7'
 APP = 'AIR780E_DEMO'
 STORE = Path(os.environ.get('AIR780E_DATA_DIR', '/etc/air780e'))
 RUNTIME = Path(os.environ.get('AIR780E_RUN_DIR', '/var/run/air780e'))
@@ -113,7 +113,7 @@ class Modem:
             self.serial.__exit__(None, None, None)
         self.serial, self.device, self.trusted, self.buffer = None, None, False, b''
         with self.guard:
-            self.state.update(connected=False, signalBars=None)
+            self.state.update(connected=False, signalBars=None, phoneNumber=None)
 
     def ensure(self):
         device = discover()
@@ -142,11 +142,11 @@ class Modem:
                 self.state = signal_level.enrich(dict(frame, connected=True, lastSeen=time.time(),
                     port=self.device['port'], interface=self.device['interface']))
         if frame.get('event') == 'sms_received' and self.trusted:
-            sms_store.save(STORE, frame)
+            sms_store.save(STORE, dict(frame,receiving_number=self.state.get('phoneNumber') or (self.manual_number() if hasattr(self,'manual_number') else '')))
         if frame.get('event') == 'inbox' and self.trusted:
             for message in frame.get('messages', []):
                 if isinstance(message, dict):
-                    sms_store.save(STORE, message)
+                    sms_store.save(STORE, dict(message,receiving_number=self.state.get('phoneNumber') or (self.manual_number() if hasattr(self,'manual_number') else '')))
         return True
 
     def receive(self, seconds):
@@ -207,6 +207,7 @@ class Service:
         RUNTIME.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(RUNTIME, 0o700)
         self.modem = Modem()
+        self.modem.manual_number=lambda:self.system_settings().get('receiving_number','')
         self.queue = queue.Queue(maxsize=32)
         self.jobs, self.guard, self.config_guard = {}, threading.RLock(), threading.RLock()
         self.last_error = ''
@@ -216,8 +217,15 @@ class Service:
         policy=STORE/'network-policy.json'
         self.net_policy=json.loads(policy.read_text()) if policy.exists() else {'enabled':None,'fallback':False}
         self.health={'state':'waiting','checkedAt':None,'interval':30,'detail':'','error':''}
+        self.settings_guard=threading.RLock()
+        self.settings_changed=threading.Event()
+        settings_path=STORE/'system-settings.json'
+        self.settings={'health_interval':30,'failure_limit':3,'traffic_interval':9,'receiving_number':''}
+        if settings_path.exists():self.settings=self.validate_settings(json.loads(settings_path.read_text()))
+        self.health['interval']=self.settings['health_interval']
         self.next_health=0
         self.traffic=TrafficSampler()
+        self.traffic.latest['interval']=self.settings['traffic_interval']
         self.busy=False
         self.auto_signature=None
         self.auto_retry_at=0
@@ -226,6 +234,22 @@ class Service:
         self.public_ip={'address':None,'checkedAt':None,'error':''}
         with sms_store.connect(STORE) as db:
             db.execute("UPDATE outbox SET state='unknown',error='服务重启，发送结果未知；没有自动重发' WHERE state='sending'")
+
+    @staticmethod
+    def validate_settings(value):
+        limits={'health_interval':(5,3600),'failure_limit':(1,20),'traffic_interval':(1,3600)}
+        if not isinstance(value,dict) or not set(value)<=set(limits)|{'receiving_number'} or not set(limits)<=set(value):
+            raise ValueError('系统设置参数无效')
+        for key,(low,high) in limits.items():
+            if type(value[key]) is not int or not low<=value[key]<=high:
+                raise ValueError('系统设置参数超出范围')
+        number=value.get('receiving_number','')
+        if not isinstance(number,str) or (number and not re.fullmatch(r'\+[1-9][0-9]{6,14}',number)):
+            raise ValueError('手机号格式须为 +国家代码和手机号码')
+        return dict(value,receiving_number=number)
+
+    def system_settings(self):
+        with self.settings_guard:return dict(self.settings)
 
     def save_network_policy(self):
         with self.guard:atomic(STORE/'network-policy.json',self.net_policy)
@@ -302,13 +326,25 @@ class Service:
 
     def rpc(self, value):
         action = value.get('action', 'snapshot')
+        if action == 'system_settings':return self.system_settings()
+        if action == 'system_settings_save':
+            validated=self.validate_settings(value.get('settings'))
+            with self.settings_guard:
+                atomic(STORE/'system-settings.json',validated)
+                self.settings=validated
+                self.traffic.latest['interval']=validated['traffic_interval']
+                self.health['interval']=validated['health_interval']
+                self.next_health=0
+                self.settings_changed.set()
+            return self.system_settings()
         if action == 'snapshot':
             with self.modem.guard:
                 state = copy.deepcopy(self.modem.state)
+            state['manualPhoneNumber']=self.system_settings().get('receiving_number','')
             state['stale'] = time.time() - state.get('lastSeen',0) > 30
             with self.guard:
                 jobs = copy.deepcopy(list(self.jobs.values()))[-30:]
-            return {'version':VERSION,'status':state,'network':self.network(),'error':self.last_error,
+            return {'settings':self.system_settings(),'version':VERSION,'status':state,'network':self.network(),'error':self.last_error,
                 'messages':sms_store.rows(STORE,value.get('kind','inbox')),'jobs':jobs,'mailStatus':self.mail_state}
         if action == 'traffic':
             return copy.deepcopy(self.traffic.latest)
@@ -634,7 +670,7 @@ class Service:
                 return healthy('重启后 4G 外网已恢复')
             except Exception as error:failed(error)
         if paused():return '手动停止，自动恢复已暂停'
-        if self.failure_count<3:
+        if self.failure_count<self.system_settings()['failure_limit']:
             self.health.update(state='failed',detail='等待下一轮检测，连续失败次数：'+str(self.failure_count));return self.health['detail']
         try:
             self.verify_network(wait_timeout=3,probe_timeout=8,interface_name='wan')
@@ -642,7 +678,7 @@ class Service:
             self.health.update(state='failed',detail='WAN 外网验证失败，未切换出口',wanError=str(error));return self.health['detail']
         if paused():return '手动停止，自动恢复已暂停'
         self.use_wan()
-        self.health.update(state='wan',detail='4G 连续失败 3 次，WAN 验证通过，已切换 WAN')
+        self.health.update(state='wan',detail='4G 连续失败 '+str(self.failure_count)+' 次，WAN 验证通过，已切换 WAN')
         return self.health['detail']
 
     def public_ip_worker(self):
@@ -662,9 +698,11 @@ class Service:
             try:
                 interface=(discover() or {}).get('interface')
                 self.traffic.sample(interface)
+                self.traffic.latest['interval']=self.system_settings()['traffic_interval']
             except Exception:
-                self.traffic.latest={'available':False,'sampledAt':time.time(),'interval':9}
-            self.stopping.wait(9)
+                self.traffic.latest={'available':False,'sampledAt':time.time(),'interval':self.system_settings()['traffic_interval']}
+            self.settings_changed.wait(self.system_settings()['traffic_interval'])
+            self.settings_changed.clear()
 
     def worker(self):
         last_sync = 0
@@ -675,7 +713,7 @@ class Service:
                 self.auto_connect()
                 if not self.queue.empty():continue
                 if time.monotonic()>=self.next_health and self.net_policy.get('enabled') is not False:
-                    self.next_health=time.monotonic()+30
+                    self.next_health=time.monotonic()+self.system_settings()['health_interval']
                     self.enqueue('health_check',{})
                     continue
                 try:

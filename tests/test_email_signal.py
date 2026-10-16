@@ -18,6 +18,18 @@ class MailTests(unittest.TestCase):
     def tearDown(self): self.directory.cleanup()
     def incoming(self,ident):
         sms_store.save(self.store,dict(event='sms_received',sms_id=ident,number='10010',message='示例短信',received='now'))
+    def test_forward_body_uses_captured_receiver_and_preserves_unknown_history(self):
+        mail.save(self.store,self.config|{'recipients':['one@example.com']})
+        sms_store.save(self.store,dict(event='sms_received',sms_id='known',number='10010',message='body',received='now',receiving_number='+8613800000000'))
+        self.incoming('unknown')
+        client=Mock();client.send_message.return_value={}
+        with patch.object(mail,'session',return_value=client):mail.forward(self.store,'mock')
+        bodies=[call.args[0].get_content() for call in client.send_message.call_args_list]
+        self.assertIn('接收短信手机号：+8613800000000',bodies[0])
+        self.assertIn('发送号码：10010',bodies[0])
+        self.assertIn('接收短信手机号：未知',bodies[1])
+        self.assertNotIn('接收短信手机号：10010',bodies[1])
+
     def test_validation(self):
         with self.assertRaises(ValueError): mail.validate(self.config|{'recipients':['a@example.com']*4+['b@example.com','c@example.com','d@example.com']})
         with self.assertRaises(ValueError): mail.validate(self.config|{'tls':'NONE'})
