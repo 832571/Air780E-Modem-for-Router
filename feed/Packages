@@ -1,12 +1,12 @@
 Package: luci-app-air780e
-Version: 1.3.7
+Version: 1.3.8
 Architecture: all
 Maintainer: 点击网络
 Section: net
 Priority: optional
 Depends: lua, luci-base, luci-compat, luci-lib-nixio, kmod-usb-acm, kmod-usb-net-cdc-ether, python3-light, python3-codecs, python3-sqlite3, python3-email, python3-openssl, python3-urllib, python3-lzma, ca-bundle, curl, ip-full, zstd
 Description: Air780E Modem for Router V1.3 - USB ECM, SMS and SMTP forwarding (MIT)
-Filename: luci-app-air780e_1.3.7_all.ipk
-Size: 64142
-SHA256sum: 83bc1b24cd6cb6c0429de0db31098d1348fe672769fb8a94ebcd9faea906db4a
+Filename: luci-app-air780e_1.3.8_all.ipk
+Size: 65631
+SHA256sum: ccd6347168391f0dff3ef3946bf286ca58852b7d2e6e5654c8fb203c7cb0abf4
 

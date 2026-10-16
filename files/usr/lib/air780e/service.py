@@ -17,6 +17,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+import dns_settings
 import email_forward
 import support_packages
 import firmware
@@ -25,7 +26,7 @@ import sms_store
 from network_monitor import TrafficSampler
 from serial_transport import ATSerial
 
-VERSION = '1.3.7'
+VERSION = '1.3.8'
 APP = 'AIR780E_DEMO'
 STORE = Path(os.environ.get('AIR780E_DATA_DIR', '/etc/air780e'))
 RUNTIME = Path(os.environ.get('AIR780E_RUN_DIR', '/var/run/air780e'))
@@ -220,7 +221,7 @@ class Service:
         self.settings_guard=threading.RLock()
         self.settings_changed=threading.Event()
         settings_path=STORE/'system-settings.json'
-        self.settings={'health_interval':30,'failure_limit':3,'traffic_interval':9,'receiving_number':''}
+        self.settings={'health_interval':30,'failure_limit':3,'traffic_interval':9,'receiving_number':'',**dns_settings.DEFAULTS}
         if settings_path.exists():self.settings=self.validate_settings(json.loads(settings_path.read_text()))
         self.health['interval']=self.settings['health_interval']
         self.next_health=0
@@ -238,7 +239,7 @@ class Service:
     @staticmethod
     def validate_settings(value):
         limits={'health_interval':(5,3600),'failure_limit':(1,20),'traffic_interval':(1,3600)}
-        if not isinstance(value,dict) or not set(value)<=set(limits)|{'receiving_number'} or not set(limits)<=set(value):
+        if not isinstance(value,dict) or not set(value)<=set(limits)|{'receiving_number',*dns_settings.DEFAULTS} or not set(limits)<=set(value):
             raise ValueError('系统设置参数无效')
         for key,(low,high) in limits.items():
             if type(value[key]) is not int or not low<=value[key]<=high:
@@ -246,10 +247,13 @@ class Service:
         number=value.get('receiving_number','')
         if not isinstance(number,str) or (number and not re.fullmatch(r'\+[1-9][0-9]{6,14}',number)):
             raise ValueError('手机号格式须为 +国家代码和手机号码')
-        return dict(value,receiving_number=number)
+        return dict(value,receiving_number=number,**dns_settings.validate(value))
 
     def system_settings(self):
         with self.settings_guard:return dict(self.settings)
+
+    def apply_dns(self,value=None):
+        dns_settings.apply(value or self.system_settings(),run,STORE)
 
     def save_network_policy(self):
         with self.guard:atomic(STORE/'network-policy.json',self.net_policy)
@@ -330,7 +334,13 @@ class Service:
         if action == 'system_settings_save':
             validated=self.validate_settings(value.get('settings'))
             with self.settings_guard:
-                atomic(STORE/'system-settings.json',validated)
+                previous=self.system_settings()
+                changed=any(validated[k]!=previous[k] for k in dns_settings.DEFAULTS)
+                if changed:self.apply_dns(validated)
+                try:atomic(STORE/'system-settings.json',validated)
+                except Exception:
+                    if changed:self.apply_dns(previous)
+                    raise
                 self.settings=validated
                 self.traffic.latest['interval']=validated['traffic_interval']
                 self.health['interval']=validated['health_interval']
@@ -418,12 +428,13 @@ class Service:
         # Dedicated DHCP interface, lower metric means primary upstream.
         for assignment in ['network.air780e=interface','network.air780e.proto=dhcp',
                 'network.air780e.device='+interface,'network.air780e.defaultroute=1','network.air780e.metric=5',
-                'network.air780e.peerdns=1','network.air780e.dns_metric=5','network.air780e.delegate=0']:
+                'network.air780e.peerdns=0','network.air780e.dns_metric=5','network.air780e.delegate=0']:
             run(['uci','set',assignment])
         if subprocess.run(['uci','-q','get','network.wan'],capture_output=True,text=True).stdout.strip()=='interface':
             run(['uci','set','network.wan.metric=10'])
             run(['uci','set','network.wan.dns_metric=10'])
         run(['uci','commit','network'])
+        self.apply_dns()
         # Join the existing WAN firewall zone so LAN clients receive NAT too.
         for index in range(32):
             zone='firewall.@zone['+str(index)+']'
@@ -580,11 +591,11 @@ class Service:
             route=run(['ip','route','get','1.1.1.1','from',source])
             if 'dev '+interface not in route or 'table 1781' not in route:
                 raise RuntimeError('请求未安全绑定 USB 出口，取消验证')
-            servers=info.get('dns-server',[])+info.get('inactive',{}).get('dns-server',[])
+            servers=list(dns_settings.validate(self.system_settings()).values()) if cellular else info.get('dns-server',[])+info.get('inactive',{}).get('dns-server',[])
             passed=False
             for host,path,marker in [('www.apple.com','/library/test/success.html','Success'),('www.cloudflare.com','/cdn-cgi/trace','ip=')]:
                 try:
-                    resolved=cellular_dns(host,source,servers or (['192.168.10.3','192.168.10.4'] if cellular else ['1.1.1.1','8.8.8.8']))
+                    resolved=cellular_dns(host,source,servers or (list(dns_settings.DEFAULTS.values()) if cellular else ['1.1.1.1','8.8.8.8']))
                     result=subprocess.run(['curl','-4','--resolve',host+':443:'+resolved,'--noproxy','*','--interface',source,'--connect-timeout','5','--max-time',str(probe_timeout),
                         '-fsS','https://'+host+path],capture_output=True,text=True,timeout=probe_timeout+5)
                     if result.returncode==0 and marker in result.stdout:
@@ -774,6 +785,10 @@ def main():
     SOCKET.unlink(missing_ok=True)
     with Server(str(SOCKET),Handler) as server:
         os.chmod(SOCKET,0o600)
+        try:
+            service.apply_dns()
+            atomic(STORE/'system-settings.json',service.system_settings())
+        except Exception as error:service.last_error=str(error)
         server.service=service
         threading.Thread(target=service.worker,daemon=True).start()
         threading.Thread(target=service.mail_worker,daemon=True).start()

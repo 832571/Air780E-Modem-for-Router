@@ -2,6 +2,16 @@
 
 [简体中文](CHANGELOG.md) | **English**
 
+## V1.3 / 1.3.8 (2026-10-16)
+- Default to 1.1.1.1 and 9.9.9.9 with persistent configuration on first startup. Edit primary and secondary IPv4 DNS in System settings.
+- Apply saved DNS to the cellular interface and router-wide forwarding, overriding DHCP DNS. Preserve values across service restart and cellular reconnection.
+- Address incorrect carrier DNS responses that prevent Google access. Preserve the existing Tailscale exit, WAN IPv6 and manual Stop policy; restore previous DNS configuration if apply fails.
+- 71 automated tests cover validation, persistence and rollback. GL-MT3000 verified DNS changes/restoration, Google HTTPS 200 and preserved exit routing.
+
+
+- Display the monitoring policy as a full sentence with configured intervals and failure threshold in all three languages.
+- Confirm WAN fallback requires the failure threshold and successful WAN Internet verification. Add tests for no premature WAN probe and cancellation during WAN verification; 71 tests pass.
+
 ## V1.3 / 1.3.7 (2026-10-15)
 
 - Forwarded emails include the receiving phone number captured when the SMS is stored, preventing later SIM changes from relabeling older messages. Legacy records without a number are explicitly marked unknown.

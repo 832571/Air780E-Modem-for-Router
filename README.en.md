@@ -6,7 +6,7 @@ A GL.iNet / OpenWrt LuCI plugin for USB cellular Internet, SMS management and em
 
 **Fully open source under the MIT license. Free to use, copy, modify, redistribute and use commercially, provided the copyright and license notices are retained.** See [LICENSE](LICENSE). No subscriptions, activation keys or telemetry. Third-party dependencies and module core firmware have separate licenses; see [Third-party components](THIRD_PARTY.en.md).
 
-Product name: **V1.3**. OpenWrt package version: **1.3.7**. Package: `luci-app-air780e`.
+Product name: **V1.3**. OpenWrt package version: **1.3.8**. Package: `luci-app-air780e`.
 
 ## Verified hardware
 
@@ -38,6 +38,8 @@ Alternatively, download the IPK from [Releases](https://github.com/832571/Air780
 Open **Services → Air780E Modem**. GL's management page and LuCI may use different ports; the development router uses port 8080 for LuCI. Connect the module, click **Start Internet**, wait for DHCP, then click **Verify 4G connection**.
 
 ## Features
+
+- DNS defaults to `1.1.1.1` and `9.9.9.9`. System settings accept custom primary/secondary IPv4 resolvers for the cellular interface and router-wide forwarding, including WAN fallback. Overrides DHCP DNS and survives restarts. Back up existing DNS settings before upgrading; configure suitable resolvers if your network needs internal DNS.
 
 - System settings persist configurable 4G checks (default 30 seconds, range 5–3600), failure threshold (default 3, range 1–20), and traffic refresh (default 9 seconds, range 1–3600). Failed recovery retests count toward the threshold.
 - If the SIM supplies no phone number, save a manual receiving number such as `+8613800000000`. Emails use the number captured per SMS; unknown legacy numbers are not backfilled using the current SIM.

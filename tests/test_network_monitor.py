@@ -15,7 +15,7 @@ class RecoveryTests(unittest.TestCase):
         for item in self.patches:item.stop()
         self.temp.cleanup()
     def test_settings_persist_and_reject_invalid_without_change(self):
-        values={'health_interval':45,'failure_limit':5,'traffic_interval':12,'receiving_number':'+8613800000000'}
+        values={'health_interval':45,'failure_limit':5,'traffic_interval':12,'receiving_number':'+8613800000000',**service.dns_settings.DEFAULTS}
         self.server.rpc({'action':'system_settings_save','settings':values})
         restored=service.Service()
         self.assertEqual(restored.rpc({'action':'system_settings'}),values)
@@ -65,6 +65,27 @@ class RecoveryTests(unittest.TestCase):
         wan.assert_called_once();self.assertEqual(self.server.health['state'],'wan')
         self.assertEqual(probe.call_args.kwargs['interface_name'],'wan')
         self.assertEqual(execute.call_count,2)
+
+    def test_wan_probe_only_after_threshold_and_before_route_change(self):
+        self.server.failure_count=1;self.server.recovery_attempted=True
+        events=[]
+        def verify(**kwargs):
+            name=kwargs.get('interface_name','air780e');events.append(name)
+            if name=='air780e':raise RuntimeError('offline')
+        with patch.object(self.server.modem,'request'),patch.object(self.server,'verify_network',side_effect=verify),patch.object(self.server,'use_wan',side_effect=lambda:events.append('switch')):
+            self.server.check_health('below')
+            self.assertEqual(events,['air780e'])
+            self.server.check_health('threshold')
+        self.assertEqual(events,['air780e','air780e','wan','switch'])
+
+    def test_manual_stop_during_wan_verification_prevents_switch(self):
+        self.server.failure_count=2;self.server.recovery_attempted=True
+        def verify(**kwargs):
+            if kwargs.get('interface_name')=='wan':self.server.net_policy['enabled']=False
+            else:raise RuntimeError('offline')
+        with patch.object(self.server.modem,'request'),patch.object(self.server,'verify_network',side_effect=verify),patch.object(self.server,'use_wan') as wan:
+            self.server.check_health('threshold');wan.assert_not_called()
+        self.assertEqual(self.server.health['state'],'disabled')
 
     def test_unavailable_wan_does_not_change_routes(self):
         with patch.object(self.server.modem,'request',return_value={'usbEnabled':True}),patch.object(self.server,'verify_network',side_effect=RuntimeError('offline')),patch.object(self.server,'execute'),patch.object(self.server,'use_wan') as wan:
