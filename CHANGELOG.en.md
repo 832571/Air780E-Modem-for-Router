@@ -2,6 +2,15 @@
 
 [简体中文](CHANGELOG.md) | **English**
 
+## V1.3 / 1.3.9 (2026-10-17)
+
+- Add an off-by-default Allow USB Internet while roaming checkbox. Companion script 0.2.4 reports registration/roaming state and confirms persistent policy changes.
+- Block USB data after reported roaming while preserving SMS/control and explicit manual Stop. Initially unknown registration starts closed; re-registration retains the previous decision to avoid USB reset loops.
+- Legacy scripts remain readable but cannot enable the control. Does not activate carrier roaming or guarantee zero traffic/charges before detection.
+- 78 Python tests plus Lua policy/full-script simulation. Real roaming requires a suitable SIM and network for separate validation.
+
+Upgrade note: the IPK does not flash the modem automatically. Roaming control requires companion script 0.2.4. Legacy 0.2.3 retains existing functions with the checkbox disabled. Explicitly confirm Install / repair firmware to upgrade the module; USB Internet is interrupted during flashing. The test router verified opt-in/out, retained off state, intact SMS history and Google HTTPS 200.
+
 ## V1.3 / 1.3.8 (2026-10-16)
 - Default to 1.1.1.1 and 9.9.9.9 with persistent configuration on first startup. Edit primary and secondary IPv4 DNS in System settings.
 - Apply saved DNS to the cellular interface and router-wide forwarding, overriding DHCP DNS. Preserve values across service restart and cellular reconnection.

@@ -1,5 +1,5 @@
 PROJECT = "AIR780E_DEMO"
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 local function initialize()
 sys = require("sys")
 -- Keep the control channel alive so task failures can be diagnosed instead of reboot looping.
@@ -9,7 +9,12 @@ sysplus = require("sysplus")
 local port = uart.VUART_0
 local buffer, ready, busy, enabled = "", false, false, false
 fskv.init()
-enabled = fskv.get("air780e_demo_usb") == true
+local requested = fskv.get("air780e_demo_usb") == true
+local roamingAllowed = fskv.get("air780e_demo_roaming") == true
+local policy = require("roaming_policy")
+local registration = mobile.status()
+local policyAllowed = false
+enabled = false
 local function configureUsb(target)
     -- Official sequence: never yield while USB is powered off.
     pm.power(pm.USB,false)
@@ -19,7 +24,7 @@ local function configureUsb(target)
     pm.power(pm.USB,true)
     return ok
 end
-configureUsb(enabled)
+configureUsb(false)
 local messages, sequence = {}, 0
 local initialized = false
 local phoneNumber = ""
@@ -29,7 +34,8 @@ local function reply(event, data, rid)
     uart.write(port, json.encode(data).."\n")
 end
 local function status(rid)
-    reply("status", {version=VERSION, smsReady=ready, usbEnabled=enabled, usbMode="ECM", rsrp=mobile.rsrp(), phoneNumber=phoneNumber}, rid)
+    registration = mobile.status()
+    reply("status", {version=VERSION, smsReady=ready, usbEnabled=enabled, usbMode="ECM", rsrp=mobile.rsrp(), phoneNumber=phoneNumber, roamingControlSupported=true, registrationStatus=registration, roaming=policy.isRoaming(registration,mobile), dataRoamingAllowed=roamingAllowed, roamingBlocked=requested and not policyAllowed, usbRequested=requested}, rid)
 end
 local function handle(line)
     local c = json.decode(line)
@@ -46,9 +52,12 @@ local function handle(line)
             local ok, err = pcall(function()
                 reply("network",{usbEnabled=target,reconfiguring=true},rid)
                 sys.wait(700)
-                if not configureUsb(target) then error("usb_config_failed") end
+                requested=target
+                policyAllowed=policy.allow(requested,roamingAllowed,mobile.status(),policyAllowed,mobile)
+                local effective=requested and policyAllowed
+                if not configureUsb(effective) then error("usb_config_failed") end
                 fskv.set("air780e_demo_usb",target)
-                enabled=target
+                enabled=effective
                 busy=false
             end)
             if not ok then
@@ -57,6 +66,13 @@ local function handle(line)
                 reply("error",{message="network_config_failed",detail=tostring(err)},rid)
             end
         end)
+    elseif c.action=="set_roaming" then
+        if type(c.enabled)~="boolean" then reply("error",{message="invalid_roaming"},rid) return end
+        if busy then reply("error",{message="device_busy"},rid) return end
+        if not fskv.set("air780e_demo_roaming",c.enabled) then reply("error",{message="roaming_save_failed"},rid) return end
+        roamingAllowed=c.enabled
+        -- ACK is sent before a possible USB re-enumeration. Status confirms the stored policy.
+        reply("roaming_policy",{dataRoamingAllowed=roamingAllowed},rid)
     elseif c.action=="send_sms" then
         if not ready then reply("error",{message="sms_not_ready"},rid) return end
         if busy then reply("error",{message="device_busy"},rid) return end
@@ -96,6 +112,21 @@ sys.taskInit(function()
     -- Core initializes cellular automatically; don't toggle radio/USB during app boot.
     sys.wait(1000)
     initialized=true
+end)
+sys.taskInit(function()
+    while true do
+        if initialized and not busy then
+            policyAllowed=policy.allow(requested,roamingAllowed,mobile.status(),policyAllowed,mobile)
+            local target=requested and policyAllowed
+            if target~=enabled then
+                busy=true
+                local ok,result=pcall(configureUsb,target)
+                if ok and result then enabled=target end
+                busy=false
+            end
+        end
+        sys.wait(1000)
+    end
 end)
 sys.timerLoopStart(function()
     local ok, err = pcall(status)

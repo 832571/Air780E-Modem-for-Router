@@ -1,0 +1,15 @@
+package.path='/usr/lib/air780e/firmware/lua/?.lua;'..package.path
+local p=require('roaming_policy')
+local mobile={CSFB_NOT_PREFERRED_REGISTERED=9,CSFB_NOT_PREFERRED_REGISTERED_ROAMING=10}
+assert(p.allow(true,false,0,false,mobile)==false)
+assert(p.allow(true,false,1,false,mobile)==true)
+assert(p.allow(true,false,5,true,mobile)==false)
+assert(p.allow(true,false,7,true,mobile)==false)
+assert(p.allow(true,false,10,true,mobile)==false)
+assert(p.allow(true,true,5,false,mobile)==true)
+assert(p.allow(false,true,5,true,mobile)==false)
+assert(p.allow(false,false,1,true,mobile)==false)
+assert(p.allow(true,false,0,true,mobile)==true)
+assert(p.allow(true,false,0,false,mobile)==false)
+assert(p.allow(true,false,1,false,mobile)==true)
+print('11 Lua roaming policy assertions passed')

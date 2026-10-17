@@ -26,7 +26,7 @@ import sms_store
 from network_monitor import TrafficSampler
 from serial_transport import ATSerial
 
-VERSION = '1.3.8'
+VERSION = '1.3.9'
 APP = 'AIR780E_DEMO'
 STORE = Path(os.environ.get('AIR780E_DATA_DIR', '/etc/air780e'))
 RUNTIME = Path(os.environ.get('AIR780E_RUN_DIR', '/var/run/air780e'))
@@ -136,7 +136,7 @@ class Modem:
         if frame.get('app') != APP or frame.get('protocol') != 1:
             return False
         if frame.get('event') == 'status':
-            if frame.get('version') != '0.2.3':
+            if frame.get('version') not in ('0.2.3','0.2.4'):
                 raise RuntimeError('设备脚本版本不兼容，请使用原版配套固件')
             self.trusted = True
             with self.guard:
@@ -221,7 +221,7 @@ class Service:
         self.settings_guard=threading.RLock()
         self.settings_changed=threading.Event()
         settings_path=STORE/'system-settings.json'
-        self.settings={'health_interval':30,'failure_limit':3,'traffic_interval':9,'receiving_number':'',**dns_settings.DEFAULTS}
+        self.settings={'health_interval':30,'failure_limit':3,'traffic_interval':9,'receiving_number':'','data_roaming':False,**dns_settings.DEFAULTS}
         if settings_path.exists():self.settings=self.validate_settings(json.loads(settings_path.read_text()))
         self.health['interval']=self.settings['health_interval']
         self.next_health=0
@@ -239,7 +239,7 @@ class Service:
     @staticmethod
     def validate_settings(value):
         limits={'health_interval':(5,3600),'failure_limit':(1,20),'traffic_interval':(1,3600)}
-        if not isinstance(value,dict) or not set(value)<=set(limits)|{'receiving_number',*dns_settings.DEFAULTS} or not set(limits)<=set(value):
+        if not isinstance(value,dict) or not set(value)<=set(limits)|{'receiving_number','data_roaming',*dns_settings.DEFAULTS} or not set(limits)<=set(value):
             raise ValueError('系统设置参数无效')
         for key,(low,high) in limits.items():
             if type(value[key]) is not int or not low<=value[key]<=high:
@@ -247,7 +247,9 @@ class Service:
         number=value.get('receiving_number','')
         if not isinstance(number,str) or (number and not re.fullmatch(r'\+[1-9][0-9]{6,14}',number)):
             raise ValueError('手机号格式须为 +国家代码和手机号码')
-        return dict(value,receiving_number=number,**dns_settings.validate(value))
+        roaming=value.get('data_roaming',False)
+        if type(roaming) is not bool:raise ValueError('漫游设置必须为复选框值')
+        return dict(value,receiving_number=number,data_roaming=roaming,**dns_settings.validate(value))
 
     def system_settings(self):
         with self.settings_guard:return dict(self.settings)
@@ -333,6 +335,14 @@ class Service:
         if action == 'system_settings':return self.system_settings()
         if action == 'system_settings_save':
             validated=self.validate_settings(value.get('settings'))
+            with self.modem.guard:
+                capable=self.modem.state.get('roamingControlSupported') is True and self.modem.state.get('connected') is True
+            roaming_change=validated['data_roaming']!=self.system_settings()['data_roaming']
+            if roaming_change and not capable:raise ValueError('当前模块脚本不支持漫游控制，请升级配套脚本')
+            with self.guard:
+                if any(j['action']=='set_roaming' and j['state'] in ('queued','running') for j in self.jobs.values()):raise ValueError('漫游设置正在应用，请等待任务完成')
+            wanted_roaming=validated['data_roaming']
+            if roaming_change:validated['data_roaming']=self.system_settings()['data_roaming']
             with self.settings_guard:
                 previous=self.system_settings()
                 changed=any(validated[k]!=previous[k] for k in dns_settings.DEFAULTS)
@@ -346,6 +356,9 @@ class Service:
                 self.health['interval']=validated['health_interval']
                 self.next_health=0
                 self.settings_changed.set()
+            if roaming_change:
+                self.enqueue('set_roaming',{'enabled':wanted_roaming})
+                return dict(self.system_settings(),roamingPending=True)
             return self.system_settings()
         if action == 'snapshot':
             with self.modem.guard:
@@ -413,7 +426,7 @@ class Service:
         if action == 'firmware_capabilities':
             supported=platform.machine() in ('aarch64','arm64')
             return {'supported':supported,'reason':'此 ARM64 路由器支持固件资源准备和安装/修复。烧录会覆盖模块核心与脚本，不自动备份原固件；请先核对型号并同步短信。' if supported else '此路由器架构暂无经验证的烧录工具，请使用原版 Mac 应用安装/修复。其他功能不受影响。',
-                'model':'Air780EHV_A11','core':'V2052','script':'0.2.3','cachePath':str(firmware.CACHE),'cacheCleanup':'reboot','resourcesReady':(firmware.CACHE/'ready.json').exists()}
+                'model':'Air780EHV_A11','core':'V2052','script':'0.2.4','cachePath':str(firmware.CACHE),'cacheCleanup':'reboot','resourcesReady':(firmware.CACHE/'ready.json').exists()}
         raise ValueError('不支持的操作')
 
     def activate(self):
@@ -494,7 +507,8 @@ class Service:
             deadline=time.monotonic()+30
             while time.monotonic()<deadline:
                 try:
-                    self.modem.request('status')
+                    verified=self.modem.request('status')
+                    if verified.get('version')!='0.2.4' or verified.get('roamingControlSupported') is not True:raise RuntimeError('新脚本能力尚未验证')
                     with self.guard:self.jobs[ident]['percent']=100
                     return '固件写入完成，配套设备协议已验证；请按需点击启动上网'
                 except Exception:
@@ -507,6 +521,16 @@ class Service:
             return self.activate()
         if action == 'verify_network':
             return self.verify_network()
+        if action == 'set_roaming':
+            state=self.modem.request('status')
+            if state.get('roamingControlSupported') is not True:raise DeviceRejected('当前模块脚本不支持漫游控制，请升级配套脚本')
+            response=self.modem.request('set_roaming',enabled=params['enabled'])
+            if response.get('dataRoamingAllowed') is not params['enabled']:raise RuntimeError('模块未确认漫游设置')
+            with self.modem.guard:self.modem.state['dataRoamingAllowed']=params['enabled']
+            with self.settings_guard:
+                updated=dict(self.settings,data_roaming=params['enabled'])
+                atomic(STORE/'system-settings.json',updated);self.settings=updated
+            return '漫游 USB 上网策略已由模块确认并保存'
         if action == 'sync':
             self.modem.request('status')
             self.modem.request('inbox')
@@ -534,7 +558,9 @@ class Service:
         while time.monotonic() < deadline:
             try:
                 result = self.modem.request('status')
-                if result.get('usbEnabled') == target:
+                if target and result.get('roamingControlSupported') and result.get('roamingBlocked') and result.get('usbRequested'):
+                    return '漫游数据已暂停，短信功能保持可用'
+                if result.get('usbEnabled') == target and (target or result.get('usbRequested') is not True):
                     if target:
                         self.activate()
                         self.wait_network()
@@ -628,6 +654,10 @@ class Service:
         run(['ifdown','air780e']);run(['ifup','air780e'])
 
     def auto_connect(self):
+        with self.modem.guard:state=copy.deepcopy(self.modem.state)
+        if state.get('roamingControlSupported') is True and state.get('dataRoamingAllowed') is not self.system_settings()['data_roaming']:
+            self.enqueue('set_roaming',{'enabled':self.system_settings()['data_roaming']});return
+        if state.get('roamingBlocked') is True:return
         if self.net_policy.get('enabled') is False or self.net_policy.get('fallback'):return
         if time.monotonic()<self.auto_retry_at:return
         with self.guard:
@@ -661,7 +691,10 @@ class Service:
         if self.net_policy.get('enabled') is None:return '等待自动识别 USB 设备'
         self.health.update(state='checking',detail='正在检测 SIM 与 4G 外网连接')
         try:
-            self.modem.request('status')
+            state=self.modem.request('status')
+            if state and state.get('roamingControlSupported') is True and state.get('roamingBlocked') is True:
+                self.health.update(state='disabled',checkedAt=time.time(),detail='漫游数据已暂停，短信功能保持可用')
+                return self.health['detail']
             self.verify_network(wait_timeout=3,probe_timeout=8)
             if paused():return '手动停止，自动恢复已暂停'
             return healthy('SIM 蜂窝外网正常')

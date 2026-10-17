@@ -15,7 +15,7 @@ class RecoveryTests(unittest.TestCase):
         for item in self.patches:item.stop()
         self.temp.cleanup()
     def test_settings_persist_and_reject_invalid_without_change(self):
-        values={'health_interval':45,'failure_limit':5,'traffic_interval':12,'receiving_number':'+8613800000000',**service.dns_settings.DEFAULTS}
+        values={'health_interval':45,'failure_limit':5,'traffic_interval':12,'receiving_number':'+8613800000000','data_roaming':False,**service.dns_settings.DEFAULTS}
         self.server.rpc({'action':'system_settings_save','settings':values})
         restored=service.Service()
         self.assertEqual(restored.rpc({'action':'system_settings'}),values)

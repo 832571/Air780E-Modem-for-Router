@@ -20,7 +20,7 @@ class RouterFeatureTests(unittest.TestCase):
             self.assertEqual(self.server.jobs['flash']['percent'],70)
             progress('固件写入完成，正在重新验证设备协议')
             self.assertEqual(self.server.jobs['flash']['percent'],95)
-        with patch.object(service.firmware,'install',side_effect=flash),patch.object(self.server.modem,'request',return_value={}):
+        with patch.object(service.firmware,'install',side_effect=flash),patch.object(self.server.modem,'request',return_value={'version':'0.2.4','roamingControlSupported':True}):
             self.server.execute('install_firmware',{'model':'Air780EHV_A11','confirmation':'覆盖固件'},'flash')
         self.assertEqual(self.server.jobs['flash']['percent'],100)
     def test_failed_flash_never_claims_100_percent(self):

@@ -6,7 +6,7 @@ A GL.iNet / OpenWrt LuCI plugin for USB cellular Internet, SMS management and em
 
 **Fully open source under the MIT license. Free to use, copy, modify, redistribute and use commercially, provided the copyright and license notices are retained.** See [LICENSE](LICENSE). No subscriptions, activation keys or telemetry. Third-party dependencies and module core firmware have separate licenses; see [Third-party components](THIRD_PARTY.en.md).
 
-Product name: **V1.3**. OpenWrt package version: **1.3.8**. Package: `luci-app-air780e`.
+Product name: **V1.3**. OpenWrt package version: **1.3.9**. Package: `luci-app-air780e`.
 
 ## Verified hardware
 
@@ -15,7 +15,7 @@ Product name: **V1.3**. OpenWrt package version: **1.3.8**. Package: `luci-app-a
 | Router | GL-MT3000, GL 4.11.0, OpenWrt 21.02, ARM64 | Models with USB Host, opkg, LuCI Lua compatibility and Python 3.9+ need separate verification |
 | Module | Air780EHV_A11 / EC718HM | Standard Air780E, other models and standard AT firmware are not considered compatible |
 | Core firmware | LuatOS V2052 Air780EHV | Must match the board |
-| Companion scripts | AIR780E_DEMO 0.2.3 / JSON protocol 1 | Other protocols are unsupported |
+| Companion scripts | AIR780E_DEMO 0.2.4 / JSON protocol 1 | Other protocols are unsupported |
 | On-router flashing | ARM64 | Other architectures require a compatible external flashing tool |
 
 `Architecture: all` describes platform-independent plugin source; **it does not mean all router models have been tested**. This package is unsuitable for firmware without USB Host, sufficient storage or LuCI Lua support, and for firmware using apk instead of opkg.
@@ -38,6 +38,9 @@ Alternatively, download the IPK from [Releases](https://github.com/832571/Air780
 Open **Services → Air780E Modem**. GL's management page and LuCI may use different ports; the development router uses port 8080 for LuCI. Connect the module, click **Start Internet**, wait for DHCP, then click **Verify 4G connection**.
 
 ## Features
+
+- System settings add an off-by-default Allow USB Internet while roaming checkbox, saved after module acknowledgement. Script 0.2.4 reports registration/roaming state and blocks USB data after reported roaming unless allowed, preserving SMS and manual Stop. Carrier roaming service is still required; detection has latency and does not guarantee zero roaming charges.
+- **Separate module-upgrade confirmation**: the IPK does not flash the module automatically. Legacy 0.2.3 retains existing features with the roaming checkbox disabled. Sync SMS, verify Air780EHV_A11, then explicitly confirm Install / repair firmware to upgrade to 0.2.4; USB Internet is interrupted. Real roaming network operation remains unverified.
 
 - DNS defaults to `1.1.1.1` and `9.9.9.9`. System settings accept custom primary/secondary IPv4 resolvers for the cellular interface and router-wide forwarding, including WAN fallback. Overrides DHCP DNS and survives restarts. Back up existing DNS settings before upgrading; configure suitable resolvers if your network needs internal DNS.
 
