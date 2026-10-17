@@ -7,7 +7,7 @@ import tarfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '1.3.9'
+VERSION = '1.3.10'
 CONTROL = f'''Package: luci-app-air780e
 Version: {VERSION}
 Architecture: all

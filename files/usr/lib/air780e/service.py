@@ -26,7 +26,7 @@ import sms_store
 from network_monitor import TrafficSampler
 from serial_transport import ATSerial
 
-VERSION = '1.3.9'
+VERSION = '1.3.10'
 APP = 'AIR780E_DEMO'
 STORE = Path(os.environ.get('AIR780E_DATA_DIR', '/etc/air780e'))
 RUNTIME = Path(os.environ.get('AIR780E_RUN_DIR', '/var/run/air780e'))

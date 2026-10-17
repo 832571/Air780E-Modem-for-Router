@@ -6,7 +6,7 @@ A GL.iNet / OpenWrt LuCI plugin for USB cellular Internet, SMS management and em
 
 **Fully open source under the MIT license. Free to use, copy, modify, redistribute and use commercially, provided the copyright and license notices are retained.** See [LICENSE](LICENSE). No subscriptions, activation keys or telemetry. Third-party dependencies and module core firmware have separate licenses; see [Third-party components](THIRD_PARTY.en.md).
 
-Product name: **V1.3**. OpenWrt package version: **1.3.9**. Package: `luci-app-air780e`.
+Product name: **V1.3**. OpenWrt package version: **1.3.10**. Package: `luci-app-air780e`.
 
 ## Verified hardware
 
@@ -52,7 +52,7 @@ Open **Services → Air780E Modem**. GL's management page and LuCI may use diffe
 - Open Tasks & diagnostics by default, with submission/completion timestamps. Show current-egress public IPv4 under USB Internet, refreshed every 60 seconds.
 - Display actual firmware stage progress, verified 100% completion and explicit acknowledgement. Cache: `/tmp/air780e-firmware`; no scheduled cleanup, cleared on router reboot.
 - Depend on `python3-codecs` automatically and provide Install support package for Unicode verification/repair. Forwarding history includes SMTP submission time; unavailable legacy timestamps remain unknown.
-- This release passes 61 regression tests; firmware progress/completion use simulation, without repeating a live flash. and languages
+- Version 1.3.10 passes 78 regression tests. The test router verified the new installation entry, confirmation/cancellation and all three languages; this update did not repeat module flashing.
 
 - Check SIM cellular Internet through the Air780E interface every 30 seconds, showing state and last check time; use two independent HTTPS endpoints.
 - Sample and display USB upload/download bytes, packets and rates every 9 seconds. Cumulative counters may reset on reconnection, include probes/tunnel traffic, and do not represent carrier billing.
@@ -75,6 +75,8 @@ SMS center acceptance does not guarantee recipient delivery. Cellular data and S
 Starting Internet sets Air780E DHCP default-route metric 5, uses module DNS and adds the interface to the existing WAN firewall zone for NAT. Stopping disables module Internet and withdraws its interface. Wired WAN metric 10 produces **Air780E first, wired WAN second**.
 
 VPN exit nodes, policy routing, IPv6 and GL kmwan can override ordinary default routing. Installation does not automatically disable VPNs or IPv6, or reconfigure other WANs. See [Network policy](docs/NETWORK.en.md) for configuration, backups and recovery, including Tailscale exit nodes with WAN IPv6.
+
+System settings now includes **Install roaming module** beside **Allow USB Internet while roaming**, opening the existing model confirmation and installation progress flow. Opening the panel does not immediately flash the module.
 
 ## Firmware and privacy
 

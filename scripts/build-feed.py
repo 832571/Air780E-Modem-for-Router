@@ -3,7 +3,7 @@ import gzip,hashlib,io,shutil,tarfile
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 dist=root/'dist'
-package=dist/'luci-app-air780e_1.3.9_all.ipk'
+package=dist/'luci-app-air780e_1.3.10_all.ipk'
 with tarfile.open(package,'r:gz') as outer:
     raw=outer.extractfile('./control.tar.gz').read()
 with tarfile.open(fileobj=io.BytesIO(raw),mode='r:gz') as inner:

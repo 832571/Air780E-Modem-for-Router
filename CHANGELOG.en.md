@@ -2,6 +2,11 @@
 
 [简体中文](CHANGELOG.md) | **English**
 
+## V1.3 / 1.3.10 (2026-10-17)
+
+- Add Install roaming module beside the roaming checkbox in System settings, reusing the existing model confirmation and installation progress flow; disable both entry buttons during installation.
+- Update all three UI languages. Opening the confirmation panel does not flash the module.
+
 ## V1.3 / 1.3.9 (2026-10-17)
 
 - Add an off-by-default Allow USB Internet while roaming checkbox. Companion script 0.2.4 reports registration/roaming state and confirms persistent policy changes.
